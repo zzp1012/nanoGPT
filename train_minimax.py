@@ -34,11 +34,11 @@ from model_minimax import build_minimax_model
 # default config values designed to train a gpt2 (124M) on OpenWebText
 # I/O
 out_dir = 'out'
-eval_interval = 2000
+eval_interval = 200
 log_interval = 1
+save_interval = 1000
 eval_iters = 200
 eval_only = False # if True, script exits right after the first eval
-always_save_checkpoint = False # if True, always save a checkpoint after each eval
 # wandb logging
 wandb_log = True # disabled by default
 wandb_project = 'minimax'
@@ -52,15 +52,15 @@ block_size = 1024
 model_name = "0.25B_dense"
 # adamw optimizer
 learning_rate = 6e-4 # max learning rate
-max_iters = 600000 # total number of training iterations
+max_iters = 50000 # total number of training iterations
 weight_decay = 1e-1
 beta1 = 0.9
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
 decay_lr = True # whether to decay the learning rate
-warmup_iters = 2000 # how many steps to warm up for
-lr_decay_iters = 600000 # should be ~= max_iters per Chinchilla
+warmup_iters = 1000 # how many steps to warm up for
+lr_decay_iters = 50000 # should be ~= max_iters per Chinchilla
 min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchilla
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
@@ -125,9 +125,6 @@ def get_batch(split):
     else:
         x, y = x.to(device), y.to(device)
     return x, y
-
-iter_num = 0
-best_val_loss = 1e9
 
 # init a new model from scratch
 print("Initializing a new model from scratch")
@@ -200,8 +197,8 @@ if wandb_log and master_process:
 
 # training loop
 X, Y = get_batch('train') # fetch the very first batch
+iter_num = 0
 t0 = time.time()
-local_iter_num = 0 # number of iterations in the lifetime of this process
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 while True:
 
@@ -220,20 +217,20 @@ while True:
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 "lr": lr,
-            })
-        if losses['val'] < best_val_loss or always_save_checkpoint:
-            best_val_loss = losses['val']
-            if iter_num > 0:
-                checkpoint = {
-                    'model': raw_model.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'iter_num': iter_num,
-                    'best_val_loss': best_val_loss,
-                    'config': config,
-                }
-                print(f"saving checkpoint to {out_dir}")
-                os.makedirs(out_dir, exist_ok=True)
-                torch.save(checkpoint, os.path.join(out_dir, 'ckpt.pt'))
+            }, step=iter_num)
+    
+    if iter_num % save_interval == 0 and iter_num > 0 and master_process:
+        checkpoint = {
+            'model': raw_model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'iter_num': iter_num,
+            'loss': losses['val'],
+            'config': config,
+        }
+        print(f"saving checkpoint to {out_dir}")
+        os.makedirs(out_dir, exist_ok=True)
+        torch.save(checkpoint, os.path.join(out_dir, f'ckpt_{iter_num}.pt'))
+    
     if iter_num == 0 and eval_only:
         break
 
@@ -274,7 +271,6 @@ while True:
         lossf = loss.item() * gradient_accumulation_steps
         print(f"iter {iter_num}: loss {lossf:.4f}, time {dt*1000:.2f}ms")
     iter_num += 1
-    local_iter_num += 1
 
     # termination conditions
     if iter_num > max_iters:
