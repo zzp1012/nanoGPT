@@ -19,13 +19,13 @@ $ torchrun --nproc_per_node=8 --nnodes=2 --node_rank=1 --master_addr=123.456.123
 import os
 import time
 import math
+import copy
 import inspect
 import random
 from contextlib import nullcontext
 
 import numpy as np
 import torch
-import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.distributed import init_process_group, destroy_process_group
 
@@ -147,6 +147,9 @@ print("Initializing a new model from scratch")
 model = build_minimax_model(model_name)
 model.to(device)
 
+# get router_aux_loss_coef
+router_aux_loss_coef = model.router_aux_loss_coef
+
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
 
@@ -189,8 +192,9 @@ def extract_moe_modules_by_attr(model, attr="experts"):
 moe_modules = extract_moe_modules_by_attr(model, attr="experts")
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
+loss_fct = torch.nn.CrossEntropyLoss()
 @torch.no_grad()
-def estimate_loss():
+def estimate_loss(model):
     out = {}
     model.eval()
     for split in ['train', 'val']:
@@ -198,8 +202,8 @@ def estimate_loss():
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                output = model(X, labels=Y)
-                loss = output.loss
+                logits = model(X).logits.view(batch_size*block_size, -1)
+                loss = loss_fct(logits, Y.view(-1))
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -220,7 +224,10 @@ def get_lr(it):
     return min_lr + coeff * (learning_rate - min_lr)
 
 # merge moe modules
-def merge_moe_modules(moe_module, seed=0):
+def merge_two_experts(moe_module, seed=0):
+    """
+    Merge two experts in a moe module.
+    """
     experts = moe_module.experts
     num_experts = len(experts)
 
@@ -231,8 +238,24 @@ def merge_moe_modules(moe_module, seed=0):
         avg = 0.5 * (p_a.data + p_b.data)
         p_a.data.copy_(avg)
         p_b.data.copy_(avg)
-    
 
+def merge_all_experts(moe_module):
+    """
+    Merge all experts in a moe module.
+    """
+    experts = moe_module.experts
+    num_experts = len(experts)
+    
+    new_expert = copy.deepcopy(experts[0])
+    for expert in experts[1:]:
+        for p_a, p_b in zip(new_expert.parameters(), expert.parameters()):
+            sum = p_a.data + p_b.data
+            p_a.data.copy_(sum)
+
+    for expert in experts:
+        for p_a, p_b in zip(new_expert.parameters(), expert.parameters()):
+            p_b.data.copy_(p_a.data / num_experts)
+    
 # logging
 if wandb_log and master_process:
     import wandb
@@ -252,7 +275,17 @@ while True:
 
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
-        losses = estimate_loss()
+        # create a new model with the same parameters
+        new_model = build_minimax_model(model_name)
+        new_model.load_state_dict(model.state_dict())
+        new_model.to(device)
+
+        # merge all experts in each moe module
+        new_moe_modules = extract_moe_modules_by_attr(new_model, attr="experts")
+        for _, moe_module in new_moe_modules:
+            merge_all_experts(moe_module)
+    
+        losses = estimate_loss(new_model)
         print(f"step {iter_num}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
         if wandb_log:
             wandb.log({
@@ -275,9 +308,9 @@ while True:
         torch.save(checkpoint, os.path.join(out_dir, f'ckpt_{iter_num}.pt'))
 
     if iter_num % merge_interval == 0:
-        for idx, (name, moe_module) in enumerate(moe_modules):
+        for idx, (_, moe_module) in enumerate(moe_modules):
             if random.Random(iter_num+idx).random() < merge_prob:
-                merge_moe_modules(moe_module, iter_num+idx)
+                merge_two_experts(moe_module, iter_num+idx)
     
     if iter_num == 0 and eval_only:
         break
@@ -292,8 +325,13 @@ while True:
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
-            output = model(X, labels=Y)
-            loss = output.loss
+            output = model(X)
+            logits = output.logits.view(batch_size*block_size, -1)
+            if output.aux_loss is not None:
+                aux_loss = router_aux_loss_coef * output.aux_loss
+                loss = loss_fct(logits, Y.view(-1)) + aux_loss
+            else:
+                loss = loss_fct(logits, Y.view(-1))
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
