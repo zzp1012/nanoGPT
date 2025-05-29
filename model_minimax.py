@@ -17,6 +17,7 @@ def build_minimax_model(model_name: str):
         config.num_local_experts = 1
         config.num_experts_per_tok = 1
         config.attn_type_list = [1] * 12
+        config.router_aux_loss_coef = 0.0
     elif model_name == "0.25B_moe":
         config.num_hidden_layers = 12
         config.hidden_size = 768

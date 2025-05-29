@@ -131,6 +131,9 @@ print("Initializing a new model from scratch")
 model = build_minimax_model(model_name)
 model.to(device)
 
+# get router_aux_loss_coef
+router_aux_loss_coef = model.router_aux_loss_coef
+
 # initialize a GradScaler. If enabled=False scaler is a no-op
 scaler = torch.amp.GradScaler('cuda', enabled=(dtype == 'float16'))
 
@@ -160,6 +163,7 @@ if ddp:
     model = DDP(model, device_ids=[ddp_local_rank])
 
 # helps estimate an arbitrarily accurate loss over either split using many batches
+loss_fct = torch.nn.CrossEntropyLoss()
 @torch.no_grad()
 def estimate_loss():
     out = {}
@@ -169,8 +173,8 @@ def estimate_loss():
         for k in range(eval_iters):
             X, Y = get_batch(split)
             with ctx:
-                output = model(X, labels=Y)
-                loss = output.loss
+                logits = model(X).logits.view(batch_size*block_size, -1)
+                loss = loss_fct(logits, Y.view(-1))
             losses[k] = loss.item()
         out[split] = losses.mean()
     model.train()
@@ -244,8 +248,13 @@ while True:
             # looking at the source of that context manager, it just toggles this variable
             model.require_backward_grad_sync = (micro_step == gradient_accumulation_steps - 1)
         with ctx:
-            output = model(X, labels=Y)
-            loss = output.loss
+            output = model(X)
+            logits = output.logits.view(batch_size*block_size, -1)
+            if output.aux_loss is not None:
+                aux_loss = router_aux_loss_coef * output.aux_loss
+                loss = loss_fct(logits, Y.view(-1)) + aux_loss
+            else:
+                loss = loss_fct(logits, Y.view(-1))
             loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
         # immediately async prefetch next batch while model is doing the forward pass on the GPU
         X, Y = get_batch('train')
