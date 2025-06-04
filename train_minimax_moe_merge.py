@@ -277,7 +277,9 @@ while True:
     if iter_num % eval_interval == 0 and master_process:
         # create a new model with the same parameters
         new_model = build_minimax_model(model_name)
-        new_model.load_state_dict(model.state_dict())
+        state_dict = raw_model.state_dict()
+        state_dict = {k[len('_orig_mod.'):]: v for k, v in state_dict.items()}
+        new_model.load_state_dict(state_dict)
         new_model.to(device)
 
         # merge all experts in each moe module
