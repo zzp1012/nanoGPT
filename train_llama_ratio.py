@@ -52,7 +52,7 @@ block_size = 1024
 # model
 model_name = "0.25B"
 # adamw optimizer
-learning_rate = 16e-5 # max learning rate
+learning_rate = 8e-4 # max learning rate
 max_iters = 50000 # total number of training iterations
 weight_decay = 0.1
 beta1 = 0.9

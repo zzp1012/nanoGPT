@@ -37,13 +37,12 @@ out_dir = 'out'
 eval_interval = 200
 log_interval = 1
 save_interval = 2000
-fisher_interval = 2000
 eval_iters = 100
 eval_only = False # if True, script exits right after the first eval
 # wandb logging
 wandb_log = True # disabled by default
-wandb_project = 'minimax_ratio'
-wandb_run_name = '0.25B_dense_baseline_ratio' # 'run' + str(time.time())
+wandb_project = 'minimax_bw'
+wandb_run_name = '0.25B_dense_baseline' # 'run' + str(time.time())
 # data
 dataset = 'openwebtext'
 gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
@@ -53,9 +52,17 @@ block_size = 1024
 model_name = "0.25B_dense"
 # adamw optimizer
 learning_rate = 8e-4 # max learning rate
+embed_alpha = 1.0
+head_alpha = 1.0
+ln_alpha = 1.0
+qk_alpha = 1.0
+vo_alpha = 1.0
+mlp_alpha = 1.0
+router_alpha = 1.0
+rmsn_alpha = 1.0
 max_iters = 50000 # total number of training iterations
 weight_decay = 0.1
-beta1 = 0.9
+beta1 = 0.90
 beta2 = 0.95
 grad_clip = 1.0 # clip gradients at this value, or disable if == 0.0
 # learning rate decay settings
@@ -149,12 +156,29 @@ model.to(device)
 router_aux_loss_coef = model.router_aux_loss_coef
 
 # optimizer
-optimizer = torch.optim.AdamW(
-    model.parameters(), 
-    lr=learning_rate, 
-    betas=(beta1, beta2), 
-    weight_decay=weight_decay
-)
+param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
+# create optim groups. Any parameters that is 2D will be weight decayed, otherwise no.
+# i.e. all weight tensors in matmuls + embeddings decay, all biases and layernorms don't.
+embed_param = [p for n, p in param_dict.items() if 'embed_tokens.weight' in n]
+qk_param = [p for n, p in param_dict.items() if 'q_proj' in n or 'k_proj' in n]
+vo_param = [p for n, p in param_dict.items() if 'v_proj' in n or 'o_proj' in n]
+router_param = [p for n, p in param_dict.items() if 'gate.weight' in n]
+mlp_param = [p for n, p in param_dict.items() if 'w1.weight' in n or 'w2.weight' in n or 'w3.weight' in n]
+ln_param = [p for n, p in param_dict.items() if 'input_layernorm.weight' in n or 'post_attention_layernorm.weight' in n]
+head_param = [p for n, p in param_dict.items() if 'lm_head.weight' in n]
+rmsn_param = [p for n, p in param_dict.items() if 'model.norm.weight' in n]
+
+# Create AdamW optimizer and use the fused version if it is available
+optimizer = torch.optim.AdamW([
+    {'params': embed_param, "name": "embed"},
+    {'params': head_param, "name": "head"},
+    {'params': ln_param, "name": "ln"},
+    {'params': qk_param, "name": "qk"},
+    {'params': vo_param, "name": "vo"},
+    {'params': mlp_param, "name": "mlp"},
+    {'params': router_param, "name": "router"},
+    {'params': rmsn_param, "name": "rmsn"},
+], lr=learning_rate, betas=(beta1, beta2), weight_decay=weight_decay)
 
 # compile the model
 if compile:
@@ -183,22 +207,10 @@ def estimate_loss():
     model.train()
     return out
 
-def get_fisher_mat(model: torch.nn.Module, optim_state: dict, iteration: int):
-    """
-    Get the gradient of the model parameters.
-    """
-    os.makedirs(f"{out_dir}/fisher_mat", exist_ok=True)
-
-    grad_dict = {}
-    for name, p in model.named_parameters():
-        if p.grad is None:
-            continue
-        grad_dict[name] = torch.abs(p.grad).flatten()
-        print(f"Saving {name} with shape {p.grad.shape}")
-    torch.save(grad_dict, f"{out_dir}/fisher_mat/grad_dict_{iteration}.pt")
-
 # learning rate decay scheduler (cosine with warmup)
-def get_lr(it, min_lr, max_lr, warmup_iters, lr_decay_iters):
+def get_lr(it, min_lr, max_lr, alpha, warmup_iters, lr_decay_iters):
+    warmup_iters *= alpha
+    max_lr *= alpha
     # 1) linear warmup for warmup_iters steps
     if it < warmup_iters:
         return max_lr * (it + 1) / (warmup_iters + 1)
@@ -223,9 +235,22 @@ t0 = time.time()
 raw_model = model.module if ddp else model # unwrap DDP container if needed
 while True:
     # determine and set the learning rate for this iteration
-    lr = get_lr(iter_num, min_lr, learning_rate, warmup_iters, lr_decay_iters)
+    alphas = {
+        "embed": embed_alpha,
+        "head": head_alpha,
+        "ln": ln_alpha,
+        "qk": qk_alpha,
+        "vo": vo_alpha,
+        "mlp": mlp_alpha,
+        "router": router_alpha,
+        "rmsn": rmsn_alpha,
+    }
+    lrs = {}
     for param_group in optimizer.param_groups:
+        group_name = param_group["name"]
+        lr = get_lr(iter_num, min_lr, learning_rate, alphas[group_name], warmup_iters, lr_decay_iters)
         param_group['lr'] = lr
+        lrs[group_name] = lr
 
     # evaluate the loss on train/val sets and write checkpoints
     if iter_num % eval_interval == 0 and master_process:
@@ -236,7 +261,7 @@ while True:
                 "iter": iter_num,
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
-                "lr": lr,
+                **{f"lr/{name}_lr": lr for name, lr in lrs.items()},
             }, step=iter_num)
     
     if iter_num % save_interval == 0 and iter_num > 0 and master_process:
@@ -254,30 +279,9 @@ while True:
     if iter_num == 0 and eval_only:
         break
 
-    model.require_backward_grad_sync = True
-    if iter_num % fisher_interval == 0 and master_process:
-        for micro_step in range(gradient_accumulation_steps):
-            with ctx:
-                output = model(X)
-            logits = output.logits.view(batch_size*block_size, -1)
-            samp_dist = torch.distributions.Categorical(logits=logits) # sample from the distribution
-            Y_sample = samp_dist.sample()
-            if output.aux_loss is not None:
-                aux_loss = router_aux_loss_coef * output.aux_loss
-                loss = F.cross_entropy(logits, Y_sample.view(-1), ignore_index=-1) + aux_loss
-            else:
-                loss = F.cross_entropy(logits, Y_sample.view(-1), ignore_index=-1)
-            loss = loss / gradient_accumulation_steps # scale the loss to account for gradient accumulation
-            # immediately async prefetch next batch while model is doing the forward pass on the GPU
-            X, Y = get_batch('train')
-            # backward pass
-            loss.backward()
-        if master_process:
-            get_fisher_mat(model, optimizer.state, iter_num)
-        # reset the gradients
-        optimizer.zero_grad(set_to_none=True)
-
     # forward backward update, with optional gradient accumulation to simulate larger batch size
+    # and using the GradScaler if data type is float16
+    model.require_backward_grad_sync = True
     for micro_step in range(gradient_accumulation_steps):
         with ctx:
             output = model(X)
