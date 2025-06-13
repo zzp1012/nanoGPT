@@ -12,3 +12,5 @@ env/
 venv/
 out/
 wandb/
+ratio/
+__archive__/
