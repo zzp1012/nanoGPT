@@ -252,7 +252,7 @@ while True:
         break
 
     model.require_backward_grad_sync = True
-    if iter_num in [1, 20, 100, 500, 1000, 2000]:
+    if iter_num % fisher_interval == 0:
         for micro_step in range(gradient_accumulation_steps):
             with ctx:
                 logits = model(X).logits.view(batch_size*block_size, -1)
