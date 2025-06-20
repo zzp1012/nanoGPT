@@ -38,4 +38,5 @@ def build_llama_model(model_name: str):
         max_position_embeddings=max_seq_length, 
         **extra_config
     )
+    print(model_args)
     return LlamaForCausalLM(model_args)

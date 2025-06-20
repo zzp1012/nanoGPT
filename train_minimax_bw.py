@@ -248,7 +248,10 @@ while True:
     lrs = {}
     for param_group in optimizer.param_groups:
         group_name = param_group["name"]
-        lr = get_lr(iter_num, min_lr, learning_rate, alphas[group_name], warmup_iters, lr_decay_iters)
+        if group_name == "embed":
+            lr = get_lr(iter_num, min_lr, learning_rate * alphas[group_name], 1., warmup_iters, lr_decay_iters)
+        else:
+            lr = get_lr(iter_num, min_lr, learning_rate, alphas[group_name], warmup_iters, lr_decay_iters)
         param_group['lr'] = lr
         lrs[group_name] = lr
 
