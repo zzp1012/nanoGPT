@@ -19,6 +19,7 @@ def build_minimax_model(model_name: str):
         config.attn_type_list = [1] * 8
         config.router_aux_loss_coef = 0.0
         config.postnorm = False
+        config.initializer_range = 0.06
     elif model_name == "0.25B_moe":
         config.num_hidden_layers = 8
         config.hidden_size = 1024
@@ -31,6 +32,7 @@ def build_minimax_model(model_name: str):
         config.num_experts_per_tok = 2
         config.attn_type_list = [1] * 8
         config.postnorm = False
+        config.initializer_range = 0.06
     else:
         raise ValueError(f"Model name {model_name} not supported")
     

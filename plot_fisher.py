@@ -6,9 +6,9 @@ import seaborn as sns
 from pathlib import Path
 
 # define Gloabl variables
-FISHER_MAT_DIR = "/jfs-dialogue-mmos02-rs02/users/Zp/nanoGPT/out/llama_ratio/0.25B/baseline/fisher_mat"
-SAVE_PATH = "/jfs-dialogue-mmos02-rs02/users/Zp/nanoGPT/out/fisher_mat_plot/llama/0.25B/baseline/"
-ITERATIONS = [2000]
+FISHER_MAT_DIR = "/jfs-dialogue-mmos02-rs02/users/Zp/nanoGPT/out/minimax_ratio/0.25B_moe/baseline_wo_compile/fisher_mat"
+SAVE_PATH = "/jfs-dialogue-mmos02-rs02/users/Zp/nanoGPT/out/plot/minimax_ratio/0.25B_moe/baseline_wo_compile/fisher_mat"
+ITERATIONS = [0, 2000, 4000, 6000, 8000, 10000]
 
 def preprocess_fisher_mat(fisher_mat: dict):
     """
@@ -29,7 +29,7 @@ def preprocess_fisher_mat(fisher_mat: dict):
             "QK": ['self_attn.q_proj.weight', 'self_attn.k_proj.weight'],
             "MLP": ['w1.weight', 'w2.weight', 'w3.weight'],
             "VO": ['self_attn.v_proj.weight', 'self_attn.o_proj.weight'],
-            # "Router": ['block_sparse_moe.gate.weight'], 
+            "Router": ['block_sparse_moe.gate.weight'], 
             "LayerNorm": ['input_layernorm.weight', 'post_attention_layernorm.weight'],
             "RMSNorm": ['model.norm.weight'],
             "Head": ['lm_head.weight'],
