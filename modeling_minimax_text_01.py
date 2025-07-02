@@ -31,7 +31,7 @@ from transformers.utils import (
     replace_return_docstrings,
 )
 from transformers.utils.import_utils import is_torch_fx_available
-from .configuration_minimax_text_01 import MiniMaxText01Config
+from configuration_minimax_text_01 import MiniMaxText01Config
 
 if is_flash_attn_2_available():
     from flash_attn import flash_attn_func, flash_attn_varlen_func
@@ -474,11 +474,16 @@ class MiniMaxText01Attention(nn.Module):
         self.rope_theta = config.rope_theta
         self.is_causal = True
         self.attention_dropout = config.attention_dropout
+        self.rms_norm_eps = config.rms_norm_eps
 
         self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
         self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
+
+        self.q_norm = MiniMaxText01RMSNorm(self.num_heads * self.head_dim, self.rms_norm_eps)
+        self.k_norm = MiniMaxText01RMSNorm(self.num_key_value_heads * self.head_dim, self.rms_norm_eps)
+
         self.rotary_dim = getattr(config, 'rotary_dim', self.head_dim)
 
         self.rotary_emb = MiniMaxText01RotaryEmbedding(
@@ -506,8 +511,8 @@ class MiniMaxText01Attention(nn.Module):
             )
         bsz, q_len, _ = hidden_states.size()
 
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
+        query_states = self.q_norm(self.q_proj(hidden_states))
+        key_states = self.k_norm(self.k_proj(hidden_states))
         value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -608,8 +613,8 @@ class MiniMaxText01FlashAttention2(MiniMaxText01Attention):
             attention_mask = kwargs.pop("padding_mask")
         bsz, q_len, _ = hidden_states.size()
 
-        query_states = self.q_proj(hidden_states)
-        key_states = self.k_proj(hidden_states)
+        query_states = self.q_norm(self.q_proj(hidden_states))
+        key_states = self.k_norm(self.k_proj(hidden_states))
         value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)

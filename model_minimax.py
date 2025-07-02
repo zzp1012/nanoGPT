@@ -1,4 +1,5 @@
-from transformers import AutoModelForCausalLM, AutoConfig
+from transformers import AutoConfig
+from modeling_minimax_text_01 import MiniMaxText01ForCausalLM
 
 def build_minimax_model(model_name: str):
     """
@@ -40,7 +41,7 @@ def build_minimax_model(model_name: str):
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters())
     
-    model = AutoModelForCausalLM.from_config(config, trust_remote_code=True)
+    model = MiniMaxText01ForCausalLM(config)
     print(f"Total number of parameters: {count_parameters(model)}")
 
     return model
