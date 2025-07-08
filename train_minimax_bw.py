@@ -48,6 +48,7 @@ dataset = 'openwebtext'
 gradient_accumulation_steps = 5 * 8 # used to simulate larger batch sizes
 batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch size
 block_size = 1024
+vocab_size = 50304
 # model
 model_name = "0.25B_dense"
 # adamw optimizer
@@ -149,7 +150,7 @@ def get_batch(split):
 
 # init a new model from scratch
 print("Initializing a new model from scratch")
-model = build_minimax_model(model_name)
+model = build_minimax_model(model_name, block_size=block_size, vocab_size=vocab_size)
 model.to(device)
 
 # get router_aux_loss_coef
