@@ -254,7 +254,7 @@ while True:
                 "train/loss": losses['train'],
                 "val/loss": losses['val'],
                 **{f"lr/{name}_lr": lr for name, lr in lrs.items()},
-            }, step=iter_num)
+            }, step=iter_num * tokens_per_iter)
     
     if iter_num % save_interval == 0 and iter_num > 0 and master_process:
         checkpoint = {
