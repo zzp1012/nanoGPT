@@ -7,28 +7,50 @@ def build_llama_model(model_name: str):
     d_input = 50304
     max_seq_length = 1024
     extra_config = {}
-    if model_name == "0.25B":
+    if model_name == "93M":
+        d_model = 512  ## fixed due to d_{kv}
+        num_heads = 16  ## fixed due to d_{kv}
+        num_layers = 8
+        d_ff = d_model * 4
+        dropout = 0.0
+        head_dim = 64
+    elif model_name == "170M":
+        d_model = 768
+        num_heads = 12
+        num_layers = 8
+        d_ff = d_model * 4
+        dropout = 0.0
+        head_dim = 128
+    elif model_name == "0.25B":
         d_model = 1024  ## fixed due to d_{kv}
         num_heads = 16  ## fixed due to d_{kv}
         num_layers = 8
         d_ff = d_model * 4
         dropout = 0.0
+        head_dim = 128
     elif model_name == "0.5B":
         d_model = 1280  ## fixed due to d_{kv}
         num_heads = 20  ## fixed due to d_{kv}
         num_layers = 15
         d_ff = d_model * 4
         dropout = 0.0
+        head_dim = 128
     elif model_name == "0.75B":
         d_model = 1664  ## fixed due to d_{kv}
         num_heads = 26  ## fixed due to d_{kv}
         num_layers = 13
         d_ff = d_model * 4
         dropout = 0.0
+        head_dim = 128
     else:
         raise ValueError(f"Model name {model_name} not supported")
+
+    print(f"FFN/hidden_size: {d_ff / d_model}")
+    print(f"FFN/num_heads/head_dim: {d_ff / num_heads / head_dim}")
+    print(f"head_dim * num_heads / hidden_size: {head_dim * num_heads / d_model}")
     
     model_args = LlamaConfig(
+        head_dim=head_dim,
         vocab_size=d_input, 
         hidden_size=d_model, 
         num_attention_heads=num_heads, 
