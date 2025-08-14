@@ -8,8 +8,8 @@ def build_llama_model(model_name: str):
     max_seq_length = 1024
     extra_config = {}
     if model_name == "93M":
-        d_model = 512  ## fixed due to d_{kv}
-        num_heads = 16  ## fixed due to d_{kv}
+        d_model = 512
+        num_heads = 16
         num_layers = 8
         d_ff = d_model * 4
         dropout = 0.0
@@ -22,23 +22,9 @@ def build_llama_model(model_name: str):
         dropout = 0.0
         head_dim = 128
     elif model_name == "0.25B":
-        d_model = 1024  ## fixed due to d_{kv}
-        num_heads = 16  ## fixed due to d_{kv}
+        d_model = 1024
+        num_heads = 16
         num_layers = 8
-        d_ff = d_model * 4
-        dropout = 0.0
-        head_dim = 128
-    elif model_name == "0.5B":
-        d_model = 1280  ## fixed due to d_{kv}
-        num_heads = 20  ## fixed due to d_{kv}
-        num_layers = 15
-        d_ff = d_model * 4
-        dropout = 0.0
-        head_dim = 128
-    elif model_name == "0.75B":
-        d_model = 1664  ## fixed due to d_{kv}
-        num_heads = 26  ## fixed due to d_{kv}
-        num_layers = 13
         d_ff = d_model * 4
         dropout = 0.0
         head_dim = 128
