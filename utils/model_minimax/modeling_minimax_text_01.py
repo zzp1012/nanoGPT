@@ -476,9 +476,22 @@ class MiniMaxText01Attention(nn.Module):
         self.attention_dropout = config.attention_dropout
         self.rms_norm_eps = config.rms_norm_eps
 
-        self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
-        self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
-        self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+        # QKV projections - either combined or separate based on config
+        self.use_combined_qkv = getattr(config, 'use_combined_qkv', False)
+        
+        if self.use_combined_qkv:
+            # Combined QKV projection
+            self.qkv_proj = nn.Linear(
+                self.hidden_size, 
+                self.num_heads * self.head_dim + 2 * self.num_key_value_heads * self.head_dim, 
+                bias=False
+            )
+        else:
+            # Separate Q, K, V projections
+            self.q_proj = nn.Linear(self.hidden_size, self.num_heads * self.head_dim, bias=False)
+            self.k_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+            self.v_proj = nn.Linear(self.hidden_size, self.num_key_value_heads * self.head_dim, bias=False)
+            
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
         self.q_norm = MiniMaxText01RMSNorm(self.num_heads * self.head_dim, self.rms_norm_eps)
@@ -511,9 +524,20 @@ class MiniMaxText01Attention(nn.Module):
             )
         bsz, q_len, _ = hidden_states.size()
 
-        query_states = self.q_norm(self.q_proj(hidden_states))
-        key_states = self.k_norm(self.k_proj(hidden_states))
-        value_states = self.v_proj(hidden_states)
+        if self.use_combined_qkv:
+            # Combined QKV projection and split
+            qkv_states = self.qkv_proj(hidden_states)
+            q_dim = self.num_heads * self.head_dim
+            kv_dim = self.num_key_value_heads * self.head_dim
+            
+            query_states = self.q_norm(qkv_states[..., :q_dim])
+            key_states = self.k_norm(qkv_states[..., q_dim:q_dim + kv_dim])
+            value_states = qkv_states[..., q_dim + kv_dim:]
+        else:
+            # Separate Q, K, V projections
+            query_states = self.q_norm(self.q_proj(hidden_states))
+            key_states = self.k_norm(self.k_proj(hidden_states))
+            value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
@@ -613,9 +637,20 @@ class MiniMaxText01FlashAttention2(MiniMaxText01Attention):
             attention_mask = kwargs.pop("padding_mask")
         bsz, q_len, _ = hidden_states.size()
 
-        query_states = self.q_norm(self.q_proj(hidden_states))
-        key_states = self.k_norm(self.k_proj(hidden_states))
-        value_states = self.v_proj(hidden_states)
+        if self.use_combined_qkv:
+            # Combined QKV projection and split
+            qkv_states = self.qkv_proj(hidden_states)
+            q_dim = self.num_heads * self.head_dim
+            kv_dim = self.num_key_value_heads * self.head_dim
+            
+            query_states = self.q_norm(qkv_states[..., :q_dim])
+            key_states = self.k_norm(qkv_states[..., q_dim:q_dim + kv_dim])
+            value_states = qkv_states[..., q_dim + kv_dim:]
+        else:
+            # Separate Q, K, V projections
+            query_states = self.q_norm(self.q_proj(hidden_states))
+            key_states = self.k_norm(self.k_proj(hidden_states))
+            value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
@@ -656,7 +691,7 @@ class MiniMaxText01FlashAttention2(MiniMaxText01Attention):
             elif hasattr(self.config, "_pre_quantization_dtype"):
                 target_dtype = self.config._pre_quantization_dtype
             else:
-                target_dtype = self.q_proj.weight.dtype
+                target_dtype = self.qkv_proj.weight.dtype if self.use_combined_qkv else self.q_proj.weight.dtype
 
             logger.warning_once(
                 f"The input hidden states seems to be silently casted in float32, this might be related to"

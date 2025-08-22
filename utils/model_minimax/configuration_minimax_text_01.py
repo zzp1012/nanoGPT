@@ -74,6 +74,9 @@ class MiniMaxText01Config(PretrainedConfig):
             The aux loss factor for the total loss.
         router_jitter_noise (`float`, *optional*, defaults to 0.0):
             Amount of noise to add to the router.
+        use_combined_qkv (`bool`, *optional*, defaults to `True`):
+            Whether to use a single combined QKV projection matrix (True) or separate Q, K, V projection matrices (False).
+            Combined QKV can be more memory and computationally efficient.
 
     ```python
     >>> from transformers import MiniMaxText01Model, MiniMaxText01Config
@@ -116,6 +119,7 @@ class MiniMaxText01Config(PretrainedConfig):
         output_router_logits=False,
         router_aux_loss_coef=0.001,
         router_jitter_noise=0.0,
+        use_combined_qkv=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -143,6 +147,7 @@ class MiniMaxText01Config(PretrainedConfig):
         self.output_router_logits = output_router_logits
         self.router_aux_loss_coef = router_aux_loss_coef
         self.router_jitter_noise = router_jitter_noise
+        self.use_combined_qkv = use_combined_qkv
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,
