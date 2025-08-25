@@ -203,6 +203,10 @@ def get_optimizer(optimizer_name, model, lr=1e-3, wd=0.1, momentum=0.95, beta1=0
         return torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=wd, betas=(beta1, beta2)
         )
+    elif optimizer_name == "sgdm":
+        return torch.optim.SGD(
+            model.parameters(), lr=lr, weight_decay=wd, momentum=momentum
+        )
     elif optimizer_name == "muon":
         muon_params = [
             p
