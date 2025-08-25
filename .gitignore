@@ -16,3 +16,4 @@ ratio/
 __archive__/
 config/
 data/
+*.sh
