@@ -173,13 +173,11 @@ def main():
             loss.backward()
 
             # save gradients
-            batch_gradients = {}
             for name, param in model.named_parameters():
                 if param.grad is not None:
                     if name not in gradient_dict:
                         gradient_dict[name] = []
                     gradient_dict[name].append(param.grad.clone().cpu())
-                    batch_gradients[name] = param.grad.clone().cpu()
 
         # compute global gradients
         global_grad_dict = {}
