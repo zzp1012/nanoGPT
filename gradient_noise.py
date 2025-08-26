@@ -121,8 +121,12 @@ def main():
         print(f"Processing checkpoint at iteration {iter_name}...")
         
         # load checkpoint
-        checkpoint = torch.load(ckpt_path, map_location='cpu')
-        config = checkpoint['config']
+        try:
+            checkpoint = torch.load(ckpt_path, map_location='cpu')
+            config = checkpoint['config']
+        except Exception as e:
+            print(f"Error loading checkpoint at {ckpt_path}: {e}")
+            continue
 
         # get the detailed config
         dataset = config.get('dataset', 'finewebedu')
