@@ -51,7 +51,8 @@ batch_size = 12 # if gradient_accumulation_steps > 1, this is the micro-batch si
 block_size = 1024
 # model
 model_name = "170M"
-use_combined_qkv = True
+use_combined_qkv = False
+use_combined_w1w3 = False
 # Muon or AdamW optimizer
 optimizer_name = "adamw"
 learning_rate = 9.5e-4 # max learning rate
@@ -145,7 +146,7 @@ def get_batch(split):
 
 # init a new model from scratch
 print("Initializing a new model from scratch")
-model = build_minimax_model(model_name, use_combined_qkv=use_combined_qkv)
+model = build_minimax_model(model_name, use_combined_qkv=use_combined_qkv, use_combined_w1w3=use_combined_w1w3)
 model.to(device)
 
 # get router_aux_loss_coef

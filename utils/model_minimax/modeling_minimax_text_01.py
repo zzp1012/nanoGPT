@@ -898,14 +898,32 @@ class MiniMaxText01BlockSparseTop2MLP(nn.Module):
         self.ffn_dim = config.intermediate_size
         self.hidden_dim = config.hidden_size
 
-        self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+        # w1w3 projections - either combined or separate based on config
+        self.use_combined_w1w3 = getattr(config, 'use_combined_w1w3', False)
+        
+        if self.use_combined_w1w3:
+            # Combined w1w3 projection
+            self.w1w3_proj = nn.Linear(self.hidden_dim, 2 * self.ffn_dim, bias=False)
+        else:
+            # Separate w1, w3 projections
+            self.w1 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+            self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
+            
         self.w2 = nn.Linear(self.ffn_dim, self.hidden_dim, bias=False)
-        self.w3 = nn.Linear(self.hidden_dim, self.ffn_dim, bias=False)
 
         self.act_fn = ACT2FN[config.hidden_act]
 
     def forward(self, hidden_states):
-        current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
+        if self.use_combined_w1w3:
+            # Combined w1w3 projection and split
+            w1w3_states = self.w1w3_proj(hidden_states)
+            w1_states = w1w3_states[..., :self.ffn_dim]
+            w3_states = w1w3_states[..., self.ffn_dim:]
+            current_hidden_states = self.act_fn(w1_states) * w3_states
+        else:
+            # Separate w1, w3 projections
+            current_hidden_states = self.act_fn(self.w1(hidden_states)) * self.w3(hidden_states)
+            
         current_hidden_states = self.w2(current_hidden_states)
         return current_hidden_states
 

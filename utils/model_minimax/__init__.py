@@ -1,7 +1,7 @@
 from transformers import AutoConfig
 from utils.model_minimax.modeling_minimax_text_01 import MiniMaxText01ForCausalLM
 
-def build_minimax_model(model_name: str, use_combined_qkv: bool = False):
+def build_minimax_model(model_name: str, use_combined_qkv: bool = False, use_combined_w1w3: bool = False):
     """
     Build a MiniMax model from a given model name.
     """
@@ -24,6 +24,7 @@ def build_minimax_model(model_name: str, use_combined_qkv: bool = False):
         config.postnorm = False
         config.initializer_range = 0.06
         config.use_combined_qkv = use_combined_qkv
+        config.use_combined_w1w3 = use_combined_w1w3
     else:
         raise ValueError(f"Model name {model_name} not supported")
 

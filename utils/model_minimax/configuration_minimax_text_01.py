@@ -77,6 +77,9 @@ class MiniMaxText01Config(PretrainedConfig):
         use_combined_qkv (`bool`, *optional*, defaults to `True`):
             Whether to use a single combined QKV projection matrix (True) or separate Q, K, V projection matrices (False).
             Combined QKV can be more memory and computationally efficient.
+        use_combined_w1w3 (`bool`, *optional*, defaults to `False`):
+            Whether to use a single combined w1w3 projection matrix (True) or separate w1, w3 projection matrices (False).
+            Combined w1w3 can be more memory and computationally efficient in the MLP blocks.
 
     ```python
     >>> from transformers import MiniMaxText01Model, MiniMaxText01Config
@@ -120,6 +123,7 @@ class MiniMaxText01Config(PretrainedConfig):
         router_aux_loss_coef=0.001,
         router_jitter_noise=0.0,
         use_combined_qkv=False,
+        use_combined_w1w3=False,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -148,6 +152,7 @@ class MiniMaxText01Config(PretrainedConfig):
         self.router_aux_loss_coef = router_aux_loss_coef
         self.router_jitter_noise = router_jitter_noise
         self.use_combined_qkv = use_combined_qkv
+        self.use_combined_w1w3 = use_combined_w1w3
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,
