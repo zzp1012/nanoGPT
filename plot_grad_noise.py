@@ -14,9 +14,10 @@ GLOBAL_BATCH_SIZE = {
     "0.98m": 10 * 8 * 12 * 1024,
     "1.9m": 20 * 8 * 12 * 1024,
     "3.9m": 40 * 8 * 12 * 1024,
+    "7.8m": 80 * 8 * 12 * 1024,
 }
 
-def plot_overall_grad_noise(overall_grad_noise_dict: dict[str, dict[str, float]], 
+def plot_overall_grad_noise(overall_grad_noise_dict: dict[str, dict[str, list[float]]], 
                             save_path: Path):
     """
     Plot the overall gradient noise for each layer.
@@ -26,7 +27,12 @@ def plot_overall_grad_noise(overall_grad_noise_dict: dict[str, dict[str, float]]
     """
     plt.figure(figsize=(8, 5))
     for key_name, grad_noise_dict in overall_grad_noise_dict.items():
-        plt.plot(grad_noise_dict.keys(), grad_noise_dict.values(), label=key_name)
+        x = np.array(list(grad_noise_dict.keys()))
+        y = np.array(list(grad_noise_dict.values())) # (num_iters, num_samples)
+        y_mu = np.mean(y, axis=1)
+        y_std = np.std(y, axis=1)
+        plt.plot(x, y_mu, label=key_name)
+        plt.fill_between(x, y_mu - y_std, y_mu + y_std, alpha=0.2)
     plt.tight_layout()
     plt.legend(loc="upper right")
     plt.grid(True)
@@ -53,30 +59,37 @@ def main():
 
     # load the data
     overall_grad_noise_dict = {}
-    filename = "gradient_noise.pkl"
     for dirname in os.listdir(args.data_dir):
-        path = data_dir / dirname / filename
-        try:
-            with open(path, "rb") as f:
-                data = pickle.load(f)
-        except Exception as e:
-            print(f"Error loading {path}: {e}")
-            continue
-
-        # get the global batch size from the dirname
         try:
             gbs = dirname.split("_")[2]
             global_batch_size = GLOBAL_BATCH_SIZE[gbs]
         except KeyError:
             print(f"Unknown global batch size: {dirname.split('_')[2]}")
             continue
-
+        
         optimizer_name = dirname.split("_")[1]
         key_name = f"{optimizer_name}_{gbs}"
 
-        overall_grad_noise_dict[key_name] = dict(sorted({
-            iter_name*global_batch_size: grad_noise for iter_name, grad_noise in data[1].items()
-        }.items(), key=lambda x: x[0]))
+        path = data_dir / dirname
+        for filename in os.listdir(path):
+            if not filename.startswith("gradient_noise_"):
+                continue
+
+            data_path = path / filename
+            try:
+                with open(data_path, "rb") as f:
+                    data = pickle.load(f)
+            except Exception as e:
+                print(f"Error loading {path}: {e}")
+                continue
+
+            if key_name not in overall_grad_noise_dict:
+                overall_grad_noise_dict[key_name] = dict(sorted({
+                    iter_name*global_batch_size: [grad_noise] for iter_name, grad_noise in data[1].items()
+                }.items(), key=lambda x: x[0]))
+            else:
+                for iter_name, grad_noise in data[1].items():
+                    overall_grad_noise_dict[key_name][iter_name*global_batch_size].append(grad_noise)
 
     plot_overall_grad_noise(overall_grad_noise_dict, save_dir / "overall_grad_noise.png")
 
