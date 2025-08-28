@@ -227,7 +227,8 @@ while True:
                 "lr": lr,
             }, step=iter_num * tokens_per_iter)
     
-    if iter_num % save_interval == 0 and iter_num > 0 and master_process:
+    early_iterations = np.logspace(0, np.log2(warmup_iters), 9, base=2, endpoint=False).astype(int)
+    if (iter_num % save_interval == 0 or iter_num in early_iterations) and iter_num >= 0 and master_process:
         checkpoint = {
             'model': raw_model.state_dict(),
             'optimizer': optimizer.state_dict(),
