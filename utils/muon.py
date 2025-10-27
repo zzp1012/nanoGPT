@@ -108,6 +108,9 @@ class Muon(torch.optim.Optimizer):
             assert p.ndim == 2, p.ndim
             self.state[p]["use_muon"] = False
             self.state[p]["use_qmuon"] = True
+        
+        # Store QK pairs for coupled updates
+        self.qk_pairs = self._build_qk_pairs(qmuon_params) if qmuon_params else []
 
     def adjust_lr_for_muon(self, lr, param_shape):
         A, B = param_shape[:2]
@@ -117,15 +120,14 @@ class Muon(torch.optim.Optimizer):
         adjusted_lr = lr * adjusted_ratio
         return adjusted_lr
 
-    def _build_qk_pairs(self, group_params):
+    def _build_qk_pairs(self, qmuon_params):
         """Build QK parameter pairs for coupled updates."""
         # Simple heuristic: pair by index (assumes QK parameters are ordered)
-        qmuon_params = [p for p in group_params if self.state[p]["use_qmuon"]]
         pairs = []
         for i in range(0, len(qmuon_params), 2):
             if i + 1 < len(qmuon_params):
                 pairs.append((qmuon_params[i], qmuon_params[i + 1]))
-
+        
         return pairs
 
     def step(self, closure=None):
@@ -187,13 +189,12 @@ class Muon(torch.optim.Optimizer):
             #         qMuon QK         #
             ############################
 
-            qk_pairs = self._build_qk_pairs(group["params"])
             lr = group["lr"]
             wd = group["wd"]
             momentum = group["momentum"]
 
             # Apply coupled QK updates using stored pairs
-            for wq, wk in qk_pairs:
+            for wq, wk in self.qk_pairs:
                 gq, gk = wq.grad, wk.grad
                 
                 if gq is None or gk is None:
@@ -212,11 +213,9 @@ class Muon(torch.optim.Optimizer):
                     
                     # Use average of both directions for symmetry
                     gm = (gm_q + gm_k.T) / 2
-                    
-                    # Ensure GM has the same dtype as parameters
                     gm = gm.to(dtype=wq.dtype)
                     
-                    # Use single shared momentum buffer for the QK pair
+                    # Momentum on GM
                     state_q = self.state[wq]
                     if "momentum_buffer" not in state_q:
                         state_q["momentum_buffer"] = torch.zeros_like(gm)
@@ -236,13 +235,8 @@ class Muon(torch.optim.Optimizer):
                     wk.data.mul_(1 - lr * wd)
                     
                     # Apply coupled updates
-                    u_q = wq.T @ p
-                    u_k = wq @ p.T
-                    wq.data.add_(u_q, alpha=-adjusted_lr)
-                    wk.data.add_(u_k, alpha=-adjusted_lr)
-                    
-                    # Explicit cleanup of intermediate tensors
-                    del gm_q, gm_k, gm, p, u_q, u_k
+                    wq.data.add_(wk @ p, alpha=-adjusted_lr)
+                    wk.data.add_(wq @ p.T, alpha=-adjusted_lr)
 
             ############################
             #       AdamW backup       #

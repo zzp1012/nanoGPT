@@ -494,8 +494,9 @@ class MiniMaxText01Attention(nn.Module):
             
         self.o_proj = nn.Linear(self.num_heads * self.head_dim, self.hidden_size, bias=False)
 
-        self.q_norm = MiniMaxText01RMSNorm(self.num_heads * self.head_dim, self.rms_norm_eps)
-        self.k_norm = MiniMaxText01RMSNorm(self.num_key_value_heads * self.head_dim, self.rms_norm_eps)
+        if self.config.use_QK_norm:
+            self.q_norm = MiniMaxText01RMSNorm(self.num_heads * self.head_dim, self.rms_norm_eps)
+            self.k_norm = MiniMaxText01RMSNorm(self.num_key_value_heads * self.head_dim, self.rms_norm_eps)
 
         self.rotary_dim = getattr(config, 'rotary_dim', self.head_dim)
 
