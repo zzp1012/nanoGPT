@@ -60,6 +60,7 @@ class Muon(torch.optim.Optimizer):
         adamw_betas: The betas for the internal AdamW.
         adamw_eps: The epsilon for the internal AdamW.
         adamw_wd: The weight decay for the internal AdamW.
+        qmuon_params: The QK parameters to be optimized by qMuon (coupled polar factor updates).
     """
 
     def __init__(
@@ -73,6 +74,7 @@ class Muon(torch.optim.Optimizer):
         adamw_params=None,
         adamw_betas=(0.95, 0.95),
         adamw_eps=1e-8,
+        qmuon_params=None,
     ):
 
         defaults = dict(
@@ -87,16 +89,25 @@ class Muon(torch.optim.Optimizer):
 
         params = list(muon_params)
         adamw_params = list(adamw_params) if adamw_params is not None else []
+        qmuon_params = list(qmuon_params) if qmuon_params is not None else []
         params.extend(adamw_params)
+        params.extend(qmuon_params)
         super().__init__(params, defaults)
-        # Sort parameters into those for which we will use Muon, and those for which we will not
+        # Sort parameters into those for which we will use Muon, qMuon, and those for which we will not
         for p in muon_params:
             # Use Muon for every parameter in muon_params which is >= 2D and doesn't look like an embedding or head layer
             assert p.ndim == 2, p.ndim
             self.state[p]["use_muon"] = True
+            self.state[p]["use_qmuon"] = False
         for p in adamw_params:
             # Do not use Muon for parameters in adamw_params
             self.state[p]["use_muon"] = False
+            self.state[p]["use_qmuon"] = False
+        for p in qmuon_params:
+            # Use qMuon for QK parameters
+            assert p.ndim == 2, p.ndim
+            self.state[p]["use_muon"] = False
+            self.state[p]["use_qmuon"] = True
 
     def adjust_lr_for_muon(self, lr, param_shape):
         A, B = param_shape[:2]
@@ -105,6 +116,17 @@ class Muon(torch.optim.Optimizer):
         adjusted_ratio = 0.2 * math.sqrt(max(A, B))
         adjusted_lr = lr * adjusted_ratio
         return adjusted_lr
+
+    def _build_qk_pairs(self, group_params):
+        """Build QK parameter pairs for coupled updates."""
+        # Simple heuristic: pair by index (assumes QK parameters are ordered)
+        qmuon_params = [p for p in group_params if self.state[p]["use_qmuon"]]
+        pairs = []
+        for i in range(0, len(qmuon_params), 2):
+            if i + 1 < len(qmuon_params):
+                pairs.append((qmuon_params[i], qmuon_params[i + 1]))
+
+        return pairs
 
     def step(self, closure=None):
         """Perform a single optimization step.
@@ -162,10 +184,71 @@ class Muon(torch.optim.Optimizer):
                 p.data.add_(u, alpha=-adjusted_lr)
 
             ############################
+            #         qMuon QK         #
+            ############################
+
+            qk_pairs = self._build_qk_pairs(group["params"])
+            lr = group["lr"]
+            wd = group["wd"]
+            momentum = group["momentum"]
+
+            # Apply coupled QK updates using stored pairs
+            for wq, wk in qk_pairs:
+                gq, gk = wq.grad, wk.grad
+                
+                if gq is None or gk is None:
+                    continue
+                
+                if gq.ndim > 2:
+                    gq = gq.view(gq.size(0), -1)
+                if gk.ndim > 2:
+                    gk = gk.view(gk.size(0), -1)
+                
+                # Approximate GM = X @ GS @ X.T using gradient coupling
+                # This is a heuristic approximation of the bilinear structure
+                with torch.no_grad():
+                    gm_q = wk.T @ gq  # Approximate X @ GS @ X.T for Q
+                    gm_k = wq.T @ gk  # Approximate X @ GS @ X.T for K
+                    
+                    # Use average of both directions for symmetry
+                    gm = (gm_q + gm_k.T) / 2
+                    
+                    # Ensure GM has the same dtype as parameters
+                    gm = gm.to(dtype=wq.dtype)
+                    
+                    # Use single shared momentum buffer for the QK pair
+                    state_q = self.state[wq]
+                    if "momentum_buffer" not in state_q:
+                        state_q["momentum_buffer"] = torch.zeros_like(gm)
+                    
+                    buf = state_q["momentum_buffer"]
+                    buf.mul_(momentum).add_(gm, alpha=1-momentum)
+                    
+                    # Apply polar factor to GM
+                    p = zeropower_via_newtonschulz5(buf, steps=group["ns_steps"])
+                    p = p.to(dtype=wq.dtype)
+                    
+                    # Coupled updates: WQ = WQ - eta * WK @ P, WK = WK - eta * WQ @ P.T
+                    adjusted_lr = self.adjust_lr_for_muon(lr, wq.shape)
+                    
+                    # Apply weight decay
+                    wq.data.mul_(1 - lr * wd)
+                    wk.data.mul_(1 - lr * wd)
+                    
+                    # Apply coupled updates
+                    u_q = 
+                    u_k = wq @ p.T
+                    wq.data.add_(u_q, alpha=-adjusted_lr)
+                    wk.data.add_(u_k, alpha=-adjusted_lr)
+                    
+                    # Explicit cleanup of intermediate tensors
+                    del gm_q, gm_k, gm, p, u_q, u_k
+
+            ############################
             #       AdamW backup       #
             ############################
 
-            params = [p for p in group["params"] if not self.state[p]["use_muon"]]
+            params = [p for p in group["params"] if not self.state[p]["use_muon"] and not self.state[p]["use_qmuon"]]
             lr = group['lr']
             beta1, beta2 = group["adamw_betas"]
             eps = group["adamw_eps"]
@@ -228,6 +311,36 @@ def get_optimizer(optimizer_name, model, lr=1e-3, wd=0.1, momentum=0.95, beta1=0
             momentum=momentum,
             adamw_params=adamw_params,
             adamw_betas=(beta1, beta2),
+        )
+    elif optimizer_name == "qmuon":
+        # Separate QK from VO/FFN parameters
+        qk_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim >= 2 and ("q_proj" in name or "k_proj" in name or "query" in name or "key" in name)
+        ]
+        muon_params = [
+            p
+            for name, p in model.named_parameters()
+            if p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
+            and not ("q_proj" in name or "k_proj" in name or "query" in name or "key" in name)
+        ]
+        adamw_params = [
+            p
+            for name, p in model.named_parameters()
+            if not (
+                p.ndim >= 2 and "embed_tokens" not in name and "lm_head" not in name
+            )
+        ]
+
+        return Muon(
+            lr=lr,
+            wd=wd,
+            muon_params=muon_params,
+            momentum=momentum,
+            adamw_params=adamw_params,
+            adamw_betas=(beta1, beta2),
+            qmuon_params=qk_params,
         )
     else:
         assert 0, "optimizer not supported"
