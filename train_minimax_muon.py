@@ -53,6 +53,7 @@ block_size = 1024
 model_name = "170M"
 use_combined_qkv = False
 use_combined_w1w3 = False
+use_QK_norm = True
 # Muon or AdamW optimizer
 optimizer_name = "adamw"
 learning_rate = 9.5e-4 # max learning rate
@@ -146,7 +147,10 @@ def get_batch(split):
 
 # init a new model from scratch
 print("Initializing a new model from scratch")
-model = build_minimax_model(model_name, use_combined_qkv=use_combined_qkv, use_combined_w1w3=use_combined_w1w3)
+model = build_minimax_model(model_name, 
+                            use_combined_qkv=use_combined_qkv, 
+                            use_combined_w1w3=use_combined_w1w3, 
+                            use_QK_norm=use_QK_norm)
 model.to(device)
 
 # get router_aux_loss_coef

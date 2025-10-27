@@ -124,6 +124,7 @@ class MiniMaxText01Config(PretrainedConfig):
         router_jitter_noise=0.0,
         use_combined_qkv=False,
         use_combined_w1w3=False,
+        use_QK_norm=True,
         **kwargs,
     ):
         self.vocab_size = vocab_size
@@ -153,6 +154,7 @@ class MiniMaxText01Config(PretrainedConfig):
         self.router_jitter_noise = router_jitter_noise
         self.use_combined_qkv = use_combined_qkv
         self.use_combined_w1w3 = use_combined_w1w3
+        self.use_QK_norm = use_QK_norm
         super().__init__(
             pad_token_id=pad_token_id,
             bos_token_id=bos_token_id,

@@ -530,13 +530,21 @@ class MiniMaxText01Attention(nn.Module):
             q_dim = self.num_heads * self.head_dim
             kv_dim = self.num_key_value_heads * self.head_dim
             
-            query_states = self.q_norm(qkv_states[..., :q_dim])
-            key_states = self.k_norm(qkv_states[..., q_dim:q_dim + kv_dim])
+            if self.config.use_QK_norm:
+                query_states = self.q_norm(qkv_states[..., :q_dim])
+                key_states = self.k_norm(qkv_states[..., q_dim:q_dim + kv_dim])
+            else:
+                query_states = qkv_states[..., :q_dim]
+                key_states = qkv_states[..., q_dim:q_dim + kv_dim]
             value_states = qkv_states[..., q_dim + kv_dim:]
         else:
             # Separate Q, K, V projections
-            query_states = self.q_norm(self.q_proj(hidden_states))
-            key_states = self.k_norm(self.k_proj(hidden_states))
+            if self.config.use_QK_norm:
+                query_states = self.q_norm(self.q_proj(hidden_states))
+                key_states = self.k_norm(self.k_proj(hidden_states))
+            else:
+                query_states = self.q_proj(hidden_states)
+                key_states = self.k_proj(hidden_states)
             value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
@@ -643,13 +651,21 @@ class MiniMaxText01FlashAttention2(MiniMaxText01Attention):
             q_dim = self.num_heads * self.head_dim
             kv_dim = self.num_key_value_heads * self.head_dim
             
-            query_states = self.q_norm(qkv_states[..., :q_dim])
-            key_states = self.k_norm(qkv_states[..., q_dim:q_dim + kv_dim])
+            if self.config.use_QK_norm:
+                query_states = self.q_norm(qkv_states[..., :q_dim])
+                key_states = self.k_norm(qkv_states[..., q_dim:q_dim + kv_dim])
+            else:
+                query_states = qkv_states[..., :q_dim]
+                key_states = qkv_states[..., q_dim:q_dim + kv_dim]
             value_states = qkv_states[..., q_dim + kv_dim:]
         else:
             # Separate Q, K, V projections
-            query_states = self.q_norm(self.q_proj(hidden_states))
-            key_states = self.k_norm(self.k_proj(hidden_states))
+            if self.config.use_QK_norm:
+                query_states = self.q_norm(self.q_proj(hidden_states))
+                key_states = self.k_norm(self.k_proj(hidden_states))
+            else:
+                query_states = self.q_proj(hidden_states)
+                key_states = self.k_proj(hidden_states)
             value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
