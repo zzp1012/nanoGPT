@@ -236,7 +236,7 @@ class Muon(torch.optim.Optimizer):
                     wk.data.mul_(1 - lr * wd)
                     
                     # Apply coupled updates
-                    u_q = 
+                    u_q = wq.T @ p
                     u_k = wq @ p.T
                     wq.data.add_(u_q, alpha=-adjusted_lr)
                     wk.data.add_(u_k, alpha=-adjusted_lr)
